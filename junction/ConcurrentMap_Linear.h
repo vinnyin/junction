@@ -81,9 +81,12 @@ public:
                 m_cell = Details::find(hash, m_table);
                 if (!m_cell)
                     return;
-                m_value = m_cell->value.load(turf::Consume);
-                if (m_value != Value(ValueTraits::Redirect))
-                    return; // Found an existing value
+                Value value = m_cell->value.load(turf::Consume);
+                if (value != Value(ValueTraits::Redirect)) {
+                    // Found an existing value
+                    m_value = value;
+                    return;
+                }
                 // We've encountered a Redirect value. Help finish the migration.
                 TURF_TRACE(ConcurrentMap_Linear, 1, "[Mutator] find was redirected", uptr(m_table), 0);
                 m_table->jobCoordinator.participate();
@@ -105,13 +108,15 @@ public:
                 }
                 case Details::InsertResult_AlreadyFound: {
                     // The hash was already found in the table.
-                    m_value = m_cell->value.load(turf::Consume);
-                    if (m_value == Value(ValueTraits::Redirect)) {
+                    Value value = m_cell->value.load(turf::Consume);
+                    if (value == Value(ValueTraits::Redirect)) {
                         // We've encountered a Redirect value.
                         TURF_TRACE(ConcurrentMap_Linear, 3, "[Mutator] insertOrFind was redirected", uptr(m_table), uptr(m_value));
                         break; // Help finish the migration.
                     }
-                    return; // Found an existing value
+                    // Found an existing value
+                    m_value = value;
+                    return;
                 }
                 case Details::InsertResult_Overflow: {
                     Details::beginTableMigration(m_map, m_table, mustDouble);
@@ -206,7 +211,7 @@ public:
                 TURF_ASSERT(m_cell); // m_value is non-NullValue, therefore cell must have been found or inserted.
                 if (m_cell->value.compareExchangeStrong(m_value, Value(ValueTraits::NullValue), turf::Consume)) {
                     // Exchange was successful and a non-NULL value was erased and returned by reference in m_value.
-                    TURF_ASSERT(m_value != ValueTraits::NullValue); // Implied by the test at the start of the loop.
+                    TURF_ASSERT(m_value != Value(ValueTraits::NullValue)); // Implied by the test at the start of the loop.
                     Value result = m_value;
                     m_value = Value(ValueTraits::NullValue); // Leave the mutator in a valid state
                     return result;
